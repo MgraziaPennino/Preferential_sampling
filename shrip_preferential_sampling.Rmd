@@ -1,0 +1,89 @@
+---
+title: "Preferential sampling with shrimp data"
+author: "Fabian E. Bachl"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Vignette Title}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+## Set things up
+
+Due to a bug preferential sampling currently only works with the backend-clean branch of inlabru and not using the CRAN version. You can obtain it using
+```{r results="hide",warning=FALSE,message=FALSE,eval=FALSE}
+devtools::install_github("fbachl/inlabru", ref="backend-clean", dependencies = TRUE)
+```
+Once you installed inlabru, run
+```{r results="hide",warning=FALSE,message=FALSE}
+library(INLA)
+library(inlabru)
+```
+
+Set default INLA values for tutorial session (faster inference but only empirical Bayes):
+
+```{r results="hide",warning=FALSE,message=FALSE}
+init.tutorial()
+```
+
+## Load the data
+Define the spatial domain using a mesh:
+```{r warning=FALSE,message=FALSE}
+data(shrimp)
+ggplot() + gg(shrimp$mesh) + gg(shrimp$hauls) + coord_equal()
+```
+
+## Model setup
+Integration points for LGCP
+```{r warning=FALSE,message=FALSE}
+ips = ipoints(shrimp$mesh)
+```
+
+Matern model for SPDE covariance
+```{r warning=FALSE,message=FALSE}
+matern <- inla.spde2.pcmatern(shrimp$mesh, 
+                              prior.sigma = c(0.1, 0.01), 
+                              prior.range = c(1, 0.01))
+```
+
+Latent components
+```{r warning=FALSE,message=FALSE}
+cmp = ~ spde(map = coordinates, model = matern) + spdeCopy(map = coordinates, copy = "spde", model = matern, fixed = FALSE) + lgcpIntercept + Intercept
+```
+
+Likelihoods
+```{r warning=FALSE,message=FALSE}
+lik1 =  like(components = cmp,
+             data =  shrimp$hauls, 
+             family = "poisson", 
+             formula = catch ~ spde + Intercept)
+
+lik2 =  like(components = cmp,
+             data =  shrimp$hauls, 
+             family = "cp",
+             ips = ips,
+             formula = coordinates ~ spdeCopy + lgcpIntercept)
+
+```
+
+## Fit the model
+```{r warning=FALSE,message=FALSE}
+fit = bru(components = cmp, lik1, lik2, options = list(max.iter = 1))
+```
+
+## Results
+
+```{r fig.width=7, message=FALSE, warning=FALSE}
+pxl = pixels(shrimp$mesh)
+fish.intensity = predict(fit, pxl, ~ exp(spde + Intercept))
+ggplot() + gg(fish.intensity) + gg(shrimp$hauls, size = 0.5)
+```
+
